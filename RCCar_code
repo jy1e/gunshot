@@ -1,0 +1,104 @@
+#include <AFMotor.h>
+
+// 1. 모터 설정 (M1: 왼쪽, M4: 오른쪽)
+AF_DCMotor motorL(1);
+AF_DCMotor motorR(4);
+
+// 2. 센서 핀 설정
+const int trigPin = A0;
+const int echoPin = A1;
+
+// 3. 주행 변수
+int threshold = 25;
+int driveSpeed = 160;
+int turnSpeed = 180;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+ 
+  motorL.setSpeed(driveSpeed);
+  motorR.setSpeed(driveSpeed);
+  Serial.println("Speed Adjusted to 160. Safety distance increased.");
+}
+
+void loop() {
+  long distance = getDistance();
+  Serial.print("Dist: "); Serial.println(distance);
+
+  // 장애물이 없거나(25cm 초과), 아주 가까운 노이즈(3cm 이하)면 전진
+  if (distance > threshold || distance <= 3) {
+    goForward();
+  }
+  // 진짜 장애물 감지 시 (4cm ~ 25cm 사이)
+  else {
+    stopRobot();
+    delay(300); // 완전 정지를 위한 대기
+
+    // 주변 스캔
+    turnLeft(150);
+    long leftDist = getDistance();
+   
+    turnRight(300);
+    long rightDist = getDistance();
+
+     // 더 트여있는 방향으로 회전
+    if (leftDist > rightDist && leftDist > 25) {
+      turnLeft(350);
+      Serial.println(">>> LEFT EXIT");
+    } else {
+      Serial.println(">>> RIGHT EXIT");
+    }
+
+    // 회피 결정 후 1.2초간 강제 직진 (장애물 구역 탈출)
+    goForward();
+    delay(1200);
+  }
+}
+
+// --- 하드웨어 제어 함수 정의 ---
+
+long getDistance() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+ 
+  long duration = pulseIn(echoPin, HIGH, 25000);
+  long dist = duration * 0.034 / 2;
+ 
+  if (dist <= 0 || dist > 400) return 400;
+  return dist;
+}
+
+void goForward() {
+  motorL.run(FORWARD);
+  motorR.run(FORWARD);
+  motorL.setSpeed(driveSpeed);
+  motorR.setSpeed(driveSpeed);
+}
+
+void stopRobot() {
+  motorL.run(RELEASE);
+  motorR.run(RELEASE);
+}
+
+void turnLeft(int ms) {
+  motorL.run(BACKWARD);
+  motorR.run(FORWARD);
+  motorL.setSpeed(turnSpeed);
+  motorR.setSpeed(turnSpeed);
+  delay(ms);
+  stopRobot();
+}
+
+void turnRight(int ms) {
+  motorL.run(FORWARD);
+  motorR.run(BACKWARD);
+  motorL.setSpeed(turnSpeed);
+  motorR.setSpeed(turnSpeed);
+  delay(ms);
+  stopRobot();
+}
