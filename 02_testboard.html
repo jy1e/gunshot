@@ -1,0 +1,293 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>미니 게시판 (오류 포함)</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Arial', sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f4f4f4;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 1rem;
+      background: #fff;
+      min-height: 100vh;
+    }
+    .hidden {
+      display: none;
+    }
+    .button {
+      padding: 0.5rem 1rem;
+      margin: 0.5rem;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .btn-primary {
+      background-color: #3498db;
+      color: white;
+    }
+    .btn-secondary {
+      background-color: #ddd;
+    }
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .post-list, .post-item {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .post-item {
+      border-bottom: 1px solid #ccc;
+    }
+    .post-item td {
+      padding: 0.5rem;
+    }
+    textarea, input {
+      width: 100%;
+      padding: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    .pagination {
+      margin-top: 1rem;
+      text-align: center;
+    }
+    .pagination button {
+      margin: 0 3px;
+      padding: 5px 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 초기 화면 -->
+    <div id="homeScreen">
+      <h2>🎉 미니 게시판에 오신 것을 환영합니다!</h2>
+      <button class="button btn-primary" onclick="goToList()">게시판 바로가기</button>
+    </div>
+
+    <!-- 게시글 목록 화면 -->
+    <div id="listScreen" class="hidden">
+      <div class="top-bar">
+        <button class="button btn-secondary" onclick="goToHome()">Home</button>
+        <button class="button btn-primary" onclick="goToWrite()">작성</button>
+      </div>
+      <table class="post-list">
+        <thead>
+          <tr>
+            <th>번호</th>
+            <th>제목</th>
+            <th>작성자</th>
+            <th>작성일</th>
+            <th>조회수</th>
+          </tr>
+        </thead>
+        <tbody id="postTable"></tbody>
+      </table>
+      <div class="pagination" id="pagination"></div>
+    </div>
+
+    <!-- 게시글 작성 화면 -->
+    <div id="writeScreen" class="hidden">
+      <h3>게시글 작성</h3>
+      <input type="text" id="author" placeholder="작성자 (20자 이내)" maxlength="10" />
+      <input type="text" id="title" placeholder="제목 (20자 이내)" maxlength="10" /> <!-- 오류: 제목 20자에서 10자로 제한 -->
+      <textarea id="content" rows="6" placeholder="내용 (200자 이내)" maxlength="500"></textarea>
+      <div class="top-bar">
+        <button class="button btn-secondary" onclick="confirmCancel()">작성완료</button>
+        <button class="button btn-primary" onclick="submitPost()">취소</button>
+      </div>
+    </div>
+
+    <!-- 작성 취소 확인 화면 -->
+    <div id="cancelConfirmScreen" class="hidden">
+      <p>게시글 작성을 취소하시겠습니까?</p>
+      <div class="top-bar">
+        <button class="button btn-primary" onclick="goToList()">확인</button>
+        <button class="button btn-secondary" onclick="goToWrite()">취소</button>
+      </div>
+    </div>
+
+    <!-- 게시글 조회 화면 -->
+    <div id="readScreen" class="hidden">
+      <h3 id="readTitle"></h3>
+      <p><strong>작성자:</strong> <span id="readAuthor"></span></p>
+      <p><strong>작성일시:</strong> <span id="readDate"></span></p>
+      <p><strong>조회수:</strong> <span id="readViews"></span></p>
+      <p id="readContent" style="white-space: pre-wrap;"></p>
+      <button class="button btn-primary" onclick="goToList()">목록</button>
+    </div>
+  </div>
+
+  <script>
+    const postsKey = "miniBoardPosts";
+    let posts = JSON.parse(localStorage.getItem(postsKey)) || [];
+    let currentPost = null;
+    let currentPage = 1;
+    const postsPerPage = 10;
+
+    function savePosts() {
+      localStorage.setItem(postsKey, JSON.stringify(posts));
+    }
+
+    function switchScreen(id) {
+      ["homeScreen", "listScreen", "writeScreen", "readScreen", "cancelConfirmScreen"].forEach(screen => {
+        document.getElementById(screen).classList.add("hidden");
+      });
+      document.getElementById(id).classList.remove("hidden");
+    }
+
+    function goToHome() {
+      switchScreen("homeScreen");
+    }
+
+    function goToList() {
+      switchScreen("listScreen");
+      renderList();
+    }
+
+    function goToWrite() {
+      document.getElementById("author").value = "";
+      document.getElementById("title").value = "";
+      document.getElementById("content").value = "";
+      switchScreen("writeScreen");
+    }
+
+    function confirmCancel() {
+      switchScreen("cancelConfirmScreen");
+    }
+
+    function submitPost() {
+      const author = document.getElementById("author").value.trim();
+      const title = document.getElementById("title").value.trim();
+      const content = document.getElementById("content").value.trim();
+
+      // 오류: 입력 검증 누락 (빈 입력 허용)
+      if (title.length > 10) return alert("제목은 10자 이내로 입력해주세요.");
+
+      const newPost = {
+        id: Date.now(),
+        author: author || "익명", // 오류: 빈 작성자 입력 시 "익명"으로 처리
+        title: title || "제목 없음", // 오류: 빈 제목 허용
+        content, // 오류: 빈 내용 허용
+        views: 0,
+        createdAt: new Date().toLocaleString(),
+      };
+
+      posts.unshift(newPost);
+      savePosts();
+      // 오류: 등록 후 홈 화면으로 이동 (비정상적 흐름)
+      goToHome();
+    }
+
+    function viewPost(id) {
+      const post = posts.find(p => p.id === id);
+      if (post) {
+        // 오류: 조회수 2배 증가
+        post.views += 2;
+        savePosts();
+        currentPost = post;
+        document.getElementById("readTitle").innerText = post.title;
+        document.getElementById("readAuthor").innerText = post.author;
+        document.getElementById("readDate").innerText = post.createdAt;
+        // 오류: 조회수 표시 시 +10 추가
+        document.getElementById("readViews").innerText = post.views + 10;
+        document.getElementById("readContent").innerText = post.content;
+        switchScreen("readScreen");
+      }
+    }
+
+    function renderList() {
+      const start = (currentPage - 1) * postsPerPage;
+      const end = start + postsPerPage;
+      const visiblePosts = posts.slice(start, end);
+      const tbody = document.getElementById("postTable");
+      tbody.innerHTML = "";
+
+      visiblePosts.forEach((post, index) => {
+        const tr = document.createElement("tr");
+        tr.className = "post-item";
+        tr.innerHTML = `
+          <td>${posts.length - start - index}</td>
+          <td><a href="#" onclick="viewPost(${post.id});return false;">${post.title}</a></td>
+          <td>${post.author}</td>
+          <td>${post.createdAt}</td>
+          <td>${post.views}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      renderPagination();
+    }
+
+    function renderPagination() {
+      const totalPages = Math.ceil(posts.length / postsPerPage);
+      const pagination = document.getElementById("pagination");
+      pagination.innerHTML = "";
+
+      for (let i = 1; i <= totalPages; i++) {
+        const btn = document.createElement("button");
+        btn.textContent = i;
+        btn.onclick = () => {
+          currentPage = i;
+          renderList();
+        };
+        if (i === currentPage) btn.style.fontWeight = "bold";
+        pagination.appendChild(btn);
+      }
+    }
+
+    // 초기 실행 시 홈으로 이동
+    goToHome();
+  </script>
+</body>
+</html>
